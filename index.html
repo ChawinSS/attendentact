@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Employee Time Clock</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+      background: #f0f2f5;
+    }
+    .card {
+      background: white;
+      padding: 25px;
+      border-radius: 16px;
+      box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+      width: 90%;
+      max-width: 400px;
+      text-align: center;
+    }
+    .input-row {
+      display: flex;
+      gap: 8px;
+      margin: 8px 0;
+    }
+    .input-row input {
+      margin: 0;
+      flex: 1;
+    }
+    .btn-search {
+      width: 52px;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #495057;
+      border-radius: 10px;
+      border: 1px solid #495057;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .btn-search:hover {
+      background: #343a40;
+    }
+    .btn-search svg {
+      width: 20px;
+      height: 20px;
+      stroke: white;
+    }
+    input, select, button {
+      width: 100%;
+      padding: 14px;
+      margin: 8px 0;
+      font-size: 16px;
+      border-radius: 10px;
+      border: 1px solid #ddd;
+      box-sizing: border-box;
+    }
+    button {
+      background: #007bff;
+      color: white;
+      border: none;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    button:disabled { background: #ccc; cursor: not-allowed; }
+    #camera-area { display: none; margin-top: 15px; border-radius: 12px; overflow: hidden; background: #000; }
+    #video { width: 100%; height: auto; transform: scaleX(-1); }
+    #canvas { display: none; }
+    #status { 
+      margin-top: 15px; 
+      font-weight: 500; 
+      font-size: 14px; 
+      min-height: 1.2em; 
+      line-height: 1.4;
+    }
+  </style>
+</head>
+<body>
+
+<div class="card">
+  <h2>Clock In / Out</h2>
+  
+  <div class="input-row">
+    <input type="text" id="employeeNumber" placeholder="Employee Number (e.g., 01)">
+    <button id="btnCheck" class="btn-search" onclick="checkEmployeeStatus()" title="Check Status" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="11" cy="11" r="8"></circle>
+        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+      </svg>
+    </button>
+  </div>
+
+  <input type="text" id="employeeName" placeholder="Full Name (e.g., Alex Smith)">
+
+  <select id="department">
+    <option value="">-- Select Department --</option>
+    <option value="Gas">Gas</option>
+    <option value="7/11">7/11</option>
+    <option value="Cafe">Cafe</option>
+    <option value="HK">HK</option>
+    <option value="Other">Other</option>
+  </select>
+
+  <div id="action-buttons">
+    <button id="btnIn" onclick="startCapture('Clock In')">Clock In</button>
+    <button id="btnOut" onclick="startCapture('Clock Out')" style="background: #dc3545;">Clock Out</button>
+  </div>
+
+  <div id="camera-area">
+    <video id="video" autoplay playsinline></video>
+    <button id="btnCapture" style="background: #28a745; margin-top: 10px;">Take Selfie to Confirm</button>
+  </div>
+
+  <canvas id="canvas"></canvas>
+  <div id="status"></div>
+</div>
+
+<script>
+  const SCRIPT_URL = "https://script.google.com/macros/s/AKfycby9J12FNfVFkPl--TVntSwkLYrG4evGRrMJXsKVArwJJQZKjq4MmHJ80vQBs7a5ocn2ag/exec";
+  let currentAction = null;
+  let localStream = null;
+
+  window.onload = function() {
+    if (localStorage.getItem("emp_num")) document.getElementById("employeeNumber").value = localStorage.getItem("emp_num");
+    if (localStorage.getItem("emp_name")) document.getElementById("employeeName").value = localStorage.getItem("emp_name");
+    if (localStorage.getItem("emp_dept")) document.getElementById("department").value = localStorage.getItem("emp_dept");
+  };
+
+  async function checkEmployeeStatus() {
+    const empNum = document.getElementById("employeeNumber").value.trim();
+    if (!empNum) {
+      showStatus("Please enter your Employee Number first.", "#dc3545");
+      return;
+    }
+
+    const btn = document.getElementById("btnCheck");
+    btn.disabled = true;
+    showStatus("Checking records...", "#555");
+
+    try {
+      const res = await fetch(`${SCRIPT_URL}?employeeNumber=${encodeURIComponent(empNum)}`);
+      const data = await res.json();
+
+      if (data.found && data.record) {
+        const isClockedIn = data.record.action === "Clock In";
+        const badgeColor = isClockedIn ? "#28a745" : "#6c757d";
+        showStatus(`Status: <strong>${data.record.action}</strong><br><small>Recorded: ${data.record.date} at ${data.record.time}</small>`, badgeColor);
+      } else {
+        showStatus(`No previous punch found for Employee #${empNum}.`, "#555");
+      }
+    } catch (err) {
+      showStatus("Could not fetch status. Check connection.", "#dc3545");
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  async function startCapture(action) {
+    const empNum = document.getElementById("employeeNumber").value.trim();
+    const name = document.getElementById("employeeName").value.trim();
+    const dept = document.getElementById("department").value;
+
+    if (!empNum || !name || !dept) {
+      showStatus("Please enter Employee Number, Name, and Department.", "#dc3545");
+      return;
+    }
+
+    currentAction = action;
+    showStatus("Opening camera...", "#555");
+    toggleUiState('camera');
+
+    try {
+      localStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
+      const video = document.getElementById('video');
+      video.srcObject = localStream;
+      document.getElementById('btnCapture').onclick = captureSelfie;
+      showStatus("Look directly into the camera.", "green");
+    } catch (err) {
+      showStatus("Camera access denied or unavailable.", "#dc3545");
+      toggleUiState('main');
+    }
+  }
+
+  function captureSelfie() {
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const context = canvas.getContext('2d');
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    context.save();
+    context.scale(-1, 1);
+    context.drawImage(video, 0, 0, -canvas.width, canvas.height);
+    context.restore();
+
+    const imageData = canvas.toDataURL('image/jpeg', 0.5);
+
+    stopCamera();
+    toggleUiState('submitting');
+    showStatus("Logging entry...", "#555");
+
+    const deviceId = getDeviceId();
+    const empNum = document.getElementById("employeeNumber").value.trim();
+    const name = document.getElementById("employeeName").value.trim();
+    const dept = document.getElementById("department").value;
+
+    localStorage.setItem("emp_num", empNum);
+    localStorage.setItem("emp_name", name);
+    localStorage.setItem("emp_dept", dept);
+
+    submitLog(empNum, name, dept, currentAction, imageData, deviceId);
+  }
+
+  function getDeviceId() {
+    let id = localStorage.getItem("app_device_id");
+    if (!id) {
+      id = "dev_" + Math.random().toString(36).substring(2, 11);
+      localStorage.setItem("app_device_id", id);
+    }
+    return id;
+  }
+
+  function submitLog(empNum, name, dept, action, photoData, devId) {
+    fetch(SCRIPT_URL, {
+      method: "POST",
+      mode: "no-cors",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        employeeNumber: empNum,
+        name: name,
+        department: dept,
+        action: action,
+        photo: photoData,
+        deviceId: devId
+      })
+    })
+    .then(() => {
+      showStatus(`✓ ${action} recorded for ${name} (${empNum}).`, "green");
+      toggleUiState('main');
+    })
+    .catch(() => {
+      showStatus("Submission failed. Try again.", "#dc3545");
+      toggleUiState('main');
+    });
+  }
+
+  function stopCamera() {
+    if (localStream) {
+      localStream.getTracks().forEach(t => t.stop());
+      localStream = null;
+    }
+  }
+
+  function toggleUiState(state) {
+    const main = document.getElementById('action-buttons');
+    const camera = document.getElementById('camera-area');
+    const searchBtn = document.getElementById('btnCheck');
+    const inputs = [
+      document.getElementById('employeeNumber'),
+      document.getElementById('employeeName'),
+      document.getElementById('department')
+    ];
+
+    if (state === 'camera') {
+      main.style.display = 'none';
+      camera.style.display = 'block';
+      searchBtn.disabled = true;
+      inputs.forEach(i => i.disabled = true);
+    } else if (state === 'submitting') {
+      camera.style.display = 'none';
+    } else {
+      main.style.display = 'block';
+      camera.style.display = 'none';
+      searchBtn.disabled = false;
+      inputs.forEach(i => i.disabled = false);
+    }
+  }
+
+  function showStatus(htmlMsg, color) {
+    const s = document.getElementById("status");
+    s.innerHTML = htmlMsg;
+    s.style.color = color;
+  }
+</script>
+
+</body>
+</html>
